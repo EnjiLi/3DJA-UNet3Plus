@@ -1,59 +1,55 @@
 # -*- coding: utf-8 -*-
-import os
 
-import functorch.dim
-import numpy as np
 import torch
 import torch.nn as nn
-from torch.nn import init
 
 
 def weights_init_normal(m):
     classname = m.__class__.__name__
     # print(classname)
     if classname.find('Conv') != -1:
-        init.normal_(m.weight.data, 0.0, 0.02)
+        nn.init.normal_(m.weight.data, 0.0, 0.02)
     elif classname.find('Linear') != -1:
-        init.normal_(m.weight.data, 0.0, 0.02)
+        nn.init.normal_(m.weight.data, 0.0, 0.02)
     elif classname.find('BatchNorm') != -1:
-        init.normal_(m.weight.data, 1.0, 0.02)
-        init.constant_(m.bias.data, 0.0)
+        nn.init.normal_(m.weight.data, 1.0, 0.02)
+        nn.init.constant_(m.bias.data, 0.0)
 
 
 def weights_init_xavier(m):
     classname = m.__class__.__name__
     # print(classname)
     if classname.find('Conv') != -1:
-        init.xavier_normal_(m.weight.data, gain=1)
+        nn.init.xavier_normal_(m.weight.data, gain=1)
     elif classname.find('Linear') != -1:
-        init.xavier_normal_(m.weight.data, gain=1)
+        nn.init.xavier_normal_(m.weight.data, gain=1)
     elif classname.find('BatchNorm') != -1:
-        init.normal_(m.weight.data, 1.0, 0.02)
-        init.constant_(m.bias.data, 0.0)
+        nn.init.normal_(m.weight.data, 1.0, 0.02)
+        nn.init.constant_(m.bias.data, 0.0)
 
 
 def weights_init_kaiming(m):
     classname = m.__class__.__name__
     # print(classname)
     if classname.find('Conv') != -1:
-        init.kaiming_normal_(m.weight.data, a=0, mode='fan_in')
+        nn.init.kaiming_normal_(m.weight.data, a=0, mode='fan_in')
     elif classname.find('Linear') != -1:
-        init.kaiming_normal_(m.weight.data, a=0, mode='fan_in')
+        nn.init.kaiming_normal_(m.weight.data, a=0, mode='fan_in')
     elif classname.find('BatchNorm') != -1:
-        init.normal_(m.weight.data, 1.0, 0.02)
-        init.constant_(m.bias.data, 0.0)
+        nn.init.normal_(m.weight.data, 1.0, 0.02)
+        nn.init.constant_(m.bias.data, 0.0)
 
 
 def weights_init_orthogonal(m):
     classname = m.__class__.__name__
     # print(classname)
     if classname.find('Conv') != -1:
-        init.orthogonal_(m.weight.data, gain=1)
+        nn.init.orthogonal_(m.weight.data, gain=1)
     elif classname.find('Linear') != -1:
-        init.orthogonal_(m.weight.data, gain=1)
+        nn.init.orthogonal_(m.weight.data, gain=1)
     elif classname.find('BatchNorm') != -1:
-        init.normal_(m.weight.data, 1.0, 0.02)
-        init.constant_(m.bias.data, 0.0)
+        nn.init.normal_(m.weight.data, 1.0, 0.02)
+        nn.init.constant_(m.bias.data, 0.0)
 
 
 def init_weights(net, init_type='normal'):
@@ -446,17 +442,5 @@ class ThreeDJAUNet3Plus(nn.Module):
         d2 = self.upscore2(self.outconv2(hd2))
         d1 = self.outconv1(hd1)
         d0 = self.out(torch.cat((d1, d2, d3, d4, d5), 1))
-        features = [h1, h2, h3, h4, h5, hd1, hd2, hd3, hd4, hd5,d5,d4,d3,d2,d1,d0]
-
         return torch.sigmoid(d0), torch.sigmoid(d1), torch.sigmoid(d2), torch.sigmoid(d3), torch.sigmoid(
             d4), torch.sigmoid(d5)
-
-
-if __name__ == '__main__':
-    model = ThreeDJAUNet3Plus(in_channels=3, n_classes=2, PCM=True, bottleneck=True)
-    model.cuda(device=torch.device('cuda:1'))
-    print(model)
-    x = torch.randn(1, 3, 512, 512, device=torch.device('cuda:1'))
-    print(x.device)
-    out = model(x)
-    print(out)
