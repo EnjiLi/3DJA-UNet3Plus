@@ -3,11 +3,9 @@ import time
 import datetime
 import torch
 
-from draw import draw_plt
 from train_utils import train_one_epoch, evaluate, create_lr_scheduler
 from my_dataset import MyDataset
 import transforms as T
-
 from src import  ThreeDJAUNet3Plus
 
 
@@ -57,7 +55,8 @@ def get_transform(train, image_size=512, mean=(0.485, 0.456, 0.406), std=(0.229,
 def create_model(num_classes, model_name, bottleneck):
     if model_name == 'ThreeDJAUNet3Plus':
         model = ThreeDJAUNet3Plus(in_channels=3, n_classes=num_classes, PCM=True, bottleneck=bottleneck)
-    return model
+        return model
+    raise NotImplementedError (f"model {model_name} is not implemented")
 
 
 def main(args):
@@ -65,24 +64,18 @@ def main(args):
     batch_size = args.batch_size
     # segmentation nun_classes + background
     num_classes = args.num_classes + 1
-
     # image size
     image_size = args.image_size
-
     # model name
     model_name = args.model_name
-
     bottleneck = args.bottleneck
-
     # using compute_mean_std.py
     mean = (0.43526826, 0.44523221, 0.41307611)
     std = (0.20436029, 0.19237618, 0.20128716)
-
-    # 用来保存训练以及验证过程中信息
     nowtimestr = "{}".format(datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
     results_file_name = model_name + "_" + nowtimestr + "_Results"
     results_file = args.data_path + '/result/' + results_file_name + '.txt'
-    # 保存模型超参数
+    # Save model hyperparameters
     hyperParameter_file_name = model_name + "_" + nowtimestr + "_HyperParameter"
     hyperParameter_file = args.data_path + '/result/' + hyperParameter_file_name + '.txt'
 
@@ -126,7 +119,7 @@ def main(args):
 
     scaler = torch.cuda.amp.GradScaler() if args.amp else None
 
-    # 创建学习率更新策略，这里是每个step更新一次(不是每个epoch)
+    # Create a learning rate update strategy, here it is updated once per step (not per epoch)
     lr_scheduler = create_lr_scheduler(optimizer, len(train_loader), args.epochs, warmup=True)
 
     if args.resume:
@@ -141,7 +134,7 @@ def main(args):
     best_dice = 0.0
     start_time = time.time()
 
-    # 写入超参数
+    # Writing Hyperparameters
     with open(hyperParameter_file, "a") as f:
         f.write(f"{args}, Number of parameter={total / 1e6}M")
 
@@ -158,16 +151,12 @@ def main(args):
 
         # write into txt
         with open(results_file, "a") as f:
-            # 记录每个epoch对应的train_loss、lr以及验证集各指标
+            # Record the train_loss, lr and validation set indicators corresponding to each epoch
             train_info = f"[epoch: {epoch}]\n" \
                          f"train_loss: {mean_loss:.4f}\n" \
                          f"lr: {lr:.6f}\n" \
                          f"dice coefficient: {dice:.4f}\n"
             f.write(train_info + val_info + "\n\n")
-
-        if epoch % 10 == 0:
-            # 画图
-            draw_plt(results_file)
 
         if args.save_best is True:
             if best_dice < dice:
@@ -188,8 +177,6 @@ def main(args):
         else:
             torch.save(save_file, "save_weights/model_{}.pth".format(epoch))
 
-
-    draw_plt(results_file)
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
 
