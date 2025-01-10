@@ -6,7 +6,7 @@ from torchvision.transforms import functional as F
 
 
 def pad_if_smaller(img, size, fill=0):
-	# 如果图像最小边长小于给定size，则用数值fill进行padding
+	# If the minimum side length of the image is less than the given size, padding is performed with the value fill.
 	min_size = min(img.size)
 	if min_size < size:
 		ow, oh = img.size

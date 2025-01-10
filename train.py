@@ -4,7 +4,7 @@ import datetime
 import torch
 
 from train_utils import train_one_epoch, evaluate, create_lr_scheduler
-from my_dataset import MyDataset
+from ja_dataset import ThreeDJaDataset
 import transforms as T
 from src import  ThreeDJAUNet3Plus
 
@@ -79,11 +79,11 @@ def main(args):
     hyperParameter_file_name = model_name + "_" + nowtimestr + "_HyperParameter"
     hyperParameter_file = args.data_path + '/result/' + hyperParameter_file_name + '.txt'
 
-    train_dataset = MyDataset(args.data_path,
+    train_dataset = ThreeDJaDataset(args.data_path,
                               train=True,
                               transforms=get_transform(train=True, image_size=image_size, mean=mean, std=std))
 
-    val_dataset = MyDataset(args.data_path,
+    val_dataset = ThreeDJaDataset(args.data_path,
                             train=False,
                             transforms=get_transform(train=False, image_size=image_size, mean=mean, std=std))
 

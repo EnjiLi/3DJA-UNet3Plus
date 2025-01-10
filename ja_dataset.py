@@ -3,9 +3,9 @@ from PIL import Image
 import numpy as np
 from torch.utils.data import Dataset
 
-class MyDataset(Dataset):
+class ThreeDJaDataset(Dataset):
 	def __init__(self, root: str, train: bool, transforms=None):
-		super(MyDataset, self).__init__()
+		super(ThreeDJaDataset, self).__init__()
 		self.flag = "train" if train else "test"
 		data_root = os.path.join(root,  self.flag)
 		assert os.path.exists(data_root), f"path '{data_root}' does not exists."
