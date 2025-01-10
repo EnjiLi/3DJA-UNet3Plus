@@ -2,11 +2,11 @@
 
 ## Introduction
 
-This repository contains the implementation of the 3DJA-UNet3+ model proposed in the paper "A method for extracting buildings from remote sensing images based on 3DJA-UNet3+". The model effectively segments buildings in remote sensing imagery by leveraging 3D Jump Distance Aggregation (3DJA) and an enhanced U-Net3+ architecture.
+This repository contains the implementation of the 3DJA-UNet3+ model proposed in the paper "A method for extracting buildings from remote sensing images based on 3DJA-UNet3+". The model effectively segments buildings in remote sensing imagery by leveraging 3D Joint Attention(3DJA) and an enhanced U-Net3+ architecture.
 
 ## Features
 
-* **3DJA Module:** Captures multi-scale contextual information and enhances feature representation using 3D Jump Distance Aggregation.
+* **3DJA Module:** Captures multi-scale contextual information and enhances feature representation using 3D Joint Attention .
 * **U-Net3+ Architecture:** Employs a refined U-Net3+ architecture for efficient feature extraction and accurate segmentation.
 * **End-to-End Trainable:** The model is designed for end-to-end training, seamlessly integrating the 3DJA module and U-Net3+ backbone.
 * **High Accuracy:** Demonstrates superior performance in building extraction tasks compared to existing methods.
