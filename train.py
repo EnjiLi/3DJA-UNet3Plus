@@ -2,11 +2,42 @@ import os
 import time
 import datetime
 import torch
-from train_utils import train_one_epoch, evaluate, create_lr_scheduler
-from ja_dataset import ThreeDJaDataset
-import transforms as T
-from src import  ThreeDJAUNet3Plus
+from evaluate import eval_model, create_lr_scheduler
+from utils.data_loading import BasicDataset
+import utils.transforms as T
+from model import ThreeDJAUNet3Plus
+from loss.dice_coefficient_loss import dice_loss, build_target
+from utils.distributed import MetricLogger, SmoothedValue
 
+
+
+def criterion(inputs, target, loss_weight=None, num_classes: int = 2, dice: bool = True, ignore_index: int = -100,
+              loss_weights=[]):
+    losses = {}
+    if isinstance(inputs, dict):
+        for name, x in inputs.items():
+            loss = torch.nn.functional.cross_entropy(x, target, ignore_index=ignore_index, weight=loss_weight)
+            if dice is True:
+                dice_target = build_target(target, num_classes, ignore_index)
+                loss += dice_loss(x, dice_target, multiclass=True, ignore_index=ignore_index)
+            losses[name] = loss
+    elif isinstance(inputs, tuple):
+        for i, x in enumerate(inputs):
+            loss = torch.nn.functional.cross_entropy(x, target, ignore_index=ignore_index, weight=loss_weight)
+            if dice is True:
+                dice_target = build_target(target, num_classes, ignore_index)
+                loss += dice_loss(x, dice_target, multiclass=True, ignore_index=ignore_index)
+            losses[f'out{i}'] = loss
+        # d1,d2,d3,d4,d5 weighted average
+        weights = loss_weights
+        losses['out'] = 0
+        for i in range(len(weights)):
+            losses['out'] += weights[i] * losses[f'out{i}']
+        losses['out'] = losses['out'] / sum(weights)
+    else:
+        losses['out'] = torch.nn.functional.cross_entropy(inputs, target, ignore_index=ignore_index, weight=loss_weight)
+
+    return losses['out']
 
 class SegmentationPresetTrain:
 	def __init__(self, base_size, crop_size, hflip_prob=0.5, vflip_prob=0.5,
@@ -51,13 +82,6 @@ def get_transform(train, image_size=512, mean=(0.485, 0.456, 0.406), std=(0.229,
 		return SegmentationPresetEval(mean=mean, std=std)
 
 
-def create_model(num_classes, model_name, bottleneck):
-	if model_name == 'ThreeDJAUNet3Plus':
-		model = ThreeDJAUNet3Plus(in_channels=3, n_classes=num_classes, PCM=True, bottleneck=bottleneck)
-		return model
-	raise NotImplementedError (f"model {model_name} is not implemented")
-
-
 def main(args):
 	device = torch.device(args.device if torch.cuda.is_available() else "cpu")
 	batch_size = args.batch_size
@@ -78,13 +102,15 @@ def main(args):
 	hyperParameter_file = args.data_path + '/result/' + hyperParameter_file_name + '.txt'
 	image_size = args.image_size
 	
-	train_dataset = ThreeDJaDataset(args.data_path,
-									train=True,
-									transforms=get_transform(train=True, image_size=image_size, mean=mean, std=std))
-	
-	val_dataset = ThreeDJaDataset(args.data_path,
-								  train=False,
-								  transforms=get_transform(train=False, image_size=image_size, mean=mean, std=std))
+	# train_dataset = ThreeDJaDataset(args.data_path,
+	# 								train=True,
+	# 								transforms=get_transform(train=True, image_size=image_size, mean=mean, std=std))
+	#
+	# val_dataset = ThreeDJaDataset(args.data_path,
+	# 							  train=False,
+	# 							  transforms=get_transform(train=False, image_size=image_size, mean=mean, std=std))
+	train_dataset = BasicDataset(args.data_path)
+	val_dataset = BasicDataset(args.data_path)
 	
 	num_workers = min([os.cpu_count(), batch_size if batch_size > 1 else 0, 8])
 	train_loader = torch.utils.data.DataLoader(train_dataset,
@@ -100,7 +126,7 @@ def main(args):
 											 pin_memory=False,
 											 collate_fn=val_dataset.collate_fn)
 	
-	model = create_model(num_classes=num_classes, model_name=model_name, bottleneck=bottleneck)
+	model = ThreeDJAUNet3Plus(in_channels=3, n_classes=num_classes, PCM=True, bottleneck=bottleneck)
 	total = sum([param.nelement() for param in model.parameters()])
 	print("====================Number of parameter:%.2fM====================" % (total / 1e6))
 	
@@ -138,10 +164,39 @@ def main(args):
 		f.write(f"{args}, Number of parameter={total / 1e6}M")
 	
 	for epoch in range(args.start_epoch, args.epochs):
-		mean_loss, lr = train_one_epoch(model, optimizer, train_loader, device, epoch, args.epochs, num_classes,
-										lr_scheduler=lr_scheduler, print_freq=args.print_freq, scaler=scaler,
-										loss_weights=args.loss_weights)
+		# mean_loss, lr = train_one_epoch(model, optimizer, train_loader, device, epoch, args.epochs, num_classes,
+		# 								lr_scheduler=lr_scheduler, print_freq=args.print_freq, scaler=scaler,
+		# 								loss_weights=args.loss_weights)
+		model.train()
+		metric_logger = MetricLogger(delimiter="  ")
+		metric_logger.add_meter('lr', SmoothedValue(window_size=1, fmt='{value:.6f}'))
+		header = 'Epoch: [{}/{}]'.format(epoch, args.epochs)
 		
+		if num_classes == 2:
+			# 设置cross_entropy中背景和前景的loss权重(根据自己的数据集进行设置)
+			loss_weight = torch.as_tensor([1.0, 2.0], device=device)
+		else:
+			loss_weight = None
+		for image, target in metric_logger.log_every(data_loader, print_freq, header):
+			image, target = image.to(device), target.to(device)
+			with torch.cuda.amp.autocast(enabled=scaler is not None):
+				output = model(image)
+				loss = criterion(output, target, loss_weight, num_classes=num_classes, ignore_index=255,
+								 loss_weights=loss_weights)
+			
+			optimizer.zero_grad()
+			if scaler is not None:
+				scaler.scale(loss).backward()
+				scaler.step(optimizer)
+				scaler.update()
+			else:
+				loss.backward()
+				optimizer.step()
+			
+			lr_scheduler.step()
+			
+			lr = optimizer.param_groups[0]["lr"]
+			metric_logger.update(loss=loss.item(), lr=lr)
 		confmat, dice = evaluate(model, val_loader, device=device, num_classes=num_classes, print_freq=args.print_freq,
 								 loss_weights=args.loss_weights)
 		val_info = str(confmat)

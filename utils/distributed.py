@@ -8,7 +8,7 @@ import torch.distributed as dist
 import errno
 import os
 
-from .dice_coefficient_loss import multiclass_dice_coeff, build_target
+from loss.dice_coefficient_loss import multiclass_dice_coeff, build_target
 
 
 class SmoothedValue(object):
