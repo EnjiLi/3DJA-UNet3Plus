@@ -12,34 +12,37 @@ from utils.distributed import MetricLogger, SmoothedValue
 
 
 def criterion(inputs, target, loss_weight=None, num_classes: int = 2, dice: bool = True, ignore_index: int = -100,
-              loss_weights=[]):
-    losses = {}
-    if isinstance(inputs, dict):
-        for name, x in inputs.items():
-            loss = torch.nn.functional.cross_entropy(x, target, ignore_index=ignore_index, weight=loss_weight)
-            if dice is True:
-                dice_target = build_target(target, num_classes, ignore_index)
-                loss += dice_loss(x, dice_target, multiclass=True, ignore_index=ignore_index)
-            losses[name] = loss
-    elif isinstance(inputs, tuple):
-        for i, x in enumerate(inputs):
-            loss = torch.nn.functional.cross_entropy(x, target, ignore_index=ignore_index, weight=loss_weight)
-            if dice is True:
-                dice_target = build_target(target, num_classes, ignore_index)
-                loss += dice_loss(x, dice_target, multiclass=True, ignore_index=ignore_index)
-            losses[f'out{i}'] = loss
-        # d1,d2,d3,d4,d5 weighted average
-        weights = loss_weights
-        losses['out'] = 0
-        for i in range(len(weights)):
-            losses['out'] += weights[i] * losses[f'out{i}']
-        losses['out'] = losses['out'] / sum(weights)
-    else:
-        losses['out'] = torch.nn.functional.cross_entropy(inputs, target, ignore_index=ignore_index, weight=loss_weight)
+			  loss_weights=[]):
+	losses = {}
+	if isinstance(inputs, dict):
+		for name, x in inputs.items():
+			loss = torch.nn.functional.cross_entropy(x, target, ignore_index=ignore_index, weight=loss_weight)
+			if dice is True:
+				dice_target = build_target(target, num_classes, ignore_index)
+				loss += dice_loss(x, dice_target, multiclass=True, ignore_index=ignore_index)
+			losses[name] = loss
+	elif isinstance(inputs, tuple):
+		for i, x in enumerate(inputs):
+			loss = torch.nn.functional.cross_entropy(x, target, ignore_index=ignore_index, weight=loss_weight)
+			if dice is True:
+				dice_target = build_target(target, num_classes, ignore_index)
+				loss += dice_loss(x, dice_target, multiclass=True, ignore_index=ignore_index)
+			losses[f'out{i}'] = loss
+		# d1,d2,d3,d4,d5 weighted average
+		weights = loss_weights
+		losses['out'] = 0
+		for i in range(len(weights)):
+			losses['out'] += weights[i] * losses[f'out{i}']
+		losses['out'] = losses['out'] / sum(weights)
+	else:
+		losses['out'] = torch.nn.functional.cross_entropy(inputs, target, ignore_index=ignore_index, weight=loss_weight)
 
-    return losses['out']
+	return losses['out']
 
 class SegmentationPresetTrain:
+	"""
+	Preprocessing for training
+	"""
 	def __init__(self, base_size, crop_size, hflip_prob=0.5, vflip_prob=0.5,
 				 mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)):
 		min_size = int(0.5 * base_size)
@@ -101,7 +104,6 @@ def main(args):
 	hyperParameter_file_name = model_name + "_" + nowtimestr + "_HyperParameter"
 	hyperParameter_file = args.data_path + '/result/' + hyperParameter_file_name + '.txt'
 	image_size = args.image_size
-	
 	# train_dataset = ThreeDJaDataset(args.data_path,
 	# 								train=True,
 	# 								transforms=get_transform(train=True, image_size=image_size, mean=mean, std=std))
