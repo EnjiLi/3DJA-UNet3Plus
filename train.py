@@ -10,9 +10,7 @@ from loss.dice_coefficient_loss import dice_loss, build_target
 from utils.distributed import MetricLogger, SmoothedValue
 
 
-
-def criterion(inputs, target, loss_weight=None, num_classes: int = 2, dice: bool = True, ignore_index: int = -100,
-			  loss_weights=[]):
+def criterion(inputs, target, loss_weight=None, num_classes: int = 2, dice: bool = True, ignore_index: int = -100, loss_weights=[]):
 	losses = {}
 	if isinstance(inputs, dict):
 		for name, x in inputs.items():
@@ -89,31 +87,10 @@ def main(args):
 	device = torch.device(args.device if torch.cuda.is_available() else "cpu")
 	batch_size = args.batch_size
 	# segmentation nun_classes + background
-	num_classes = args.num_classes + 1
-	# image size-
-	# model name
+	num_classes = args.num_classes + 1	# image size-
 	model_name = args.model_name
 	bottleneck = args.bottleneck
-	# using compute_mean_std.py
-	mean = (0.43526826, 0.44523221, 0.41307611)
-	std = (0.20436029, 0.19237618, 0.20128716)
-	nowtimestr = "{}".format(datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
-	results_file_name = model_name + "_" + nowtimestr + "_Results"
-	results_file = args.data_path + '/result/' + results_file_name + '.txt'
-	# Save model hyperparameters
-	hyperParameter_file_name = model_name + "_" + nowtimestr + "_HyperParameter"
-	hyperParameter_file = args.data_path + '/result/' + hyperParameter_file_name + '.txt'
-	image_size = args.image_size
-	# train_dataset = ThreeDJaDataset(args.data_path,
-	# 								train=True,
-	# 								transforms=get_transform(train=True, image_size=image_size, mean=mean, std=std))
-	#
-	# val_dataset = ThreeDJaDataset(args.data_path,
-	# 							  train=False,
-	# 							  transforms=get_transform(train=False, image_size=image_size, mean=mean, std=std))
-	train_dataset = BasicDataset(args.data_path)
-	val_dataset = BasicDataset(args.data_path)
-	
+	train_dataset = BasicDataset(images_dir= args.data_path, mask_dir= args.data_path)
 	num_workers = min([os.cpu_count(), batch_size if batch_size > 1 else 0, 8])
 	train_loader = torch.utils.data.DataLoader(train_dataset,
 											   batch_size=batch_size,
@@ -121,12 +98,6 @@ def main(args):
 											   shuffle=True,
 											   pin_memory=False,
 											   collate_fn=train_dataset.collate_fn)
-	
-	val_loader = torch.utils.data.DataLoader(val_dataset,
-											 batch_size=batch_size,
-											 num_workers=num_workers,
-											 pin_memory=False,
-											 collate_fn=val_dataset.collate_fn)
 	
 	model = ThreeDJAUNet3Plus(in_channels=3, n_classes=num_classes, PCM=True, bottleneck=bottleneck)
 	total = sum([param.nelement() for param in model.parameters()])
@@ -175,7 +146,6 @@ def main(args):
 		header = 'Epoch: [{}/{}]'.format(epoch, args.epochs)
 		
 		if num_classes == 2:
-			# 设置cross_entropy中背景和前景的loss权重(根据自己的数据集进行设置)
 			loss_weight = torch.as_tensor([1.0, 2.0], device=device)
 		else:
 			loss_weight = None
@@ -242,15 +212,13 @@ def main(args):
 def parse_args():
 	import argparse
 	parser = argparse.ArgumentParser(description="pytorch unet training")
-	
-	parser.add_argument("--data-path", default="./INRIA", choices=['./WHU', './INRIA','./Massachusetts'], help="dataset root")
-	# exclude background
+	parser.add_argument("--image-path", default="./INRIA", choices=['./WHU', './INRIA','./Massachusetts'], help="dataset root")
+	parser.add_argument("--mask-path", default="./INRIA/train/label", help="dataset root")
 	parser.add_argument("--num-classes", default=1, type=int)
 	parser.add_argument("--device", default="cuda:0", help="training device")
 	parser.add_argument("-b", "--batch-size", default=2, type=int)
 	parser.add_argument("--epochs", default=100, type=int, metavar="N",
 						help="number of total epochs to train")
-	
 	parser.add_argument('--lr', default=0.005, type=float, help='initial learning rate')
 	parser.add_argument('--optimizer', default='SGD-M', choices=['SGD-M', 'Adam'], help='optimizer')
 	parser.add_argument('--momentum', default=0.9, type=float, metavar='M', help='momentum')
@@ -259,23 +227,10 @@ def parse_args():
 						dest='weight_decay')
 	parser.add_argument('--print-freq', default=5, type=int, help='print frequency')
 	parser.add_argument('--resume', default='', help='resume from checkpoint')
-	parser.add_argument('--start-epoch', default=1, type=int, metavar='N',
-						help='start epoch')
-	parser.add_argument('--save-best', default=True, type=bool, help='only save best dice weights')
 	# Mixed precision training parameters
 	parser.add_argument("--amp", default=False, type=bool,
 						help="Use torch.cuda.amp for mixed precision training")
-	
 	parser.add_argument("--image-size", default=512, type=int, help="size fo input image ")
-	
-	# model name
-	parser.add_argument("--model-name", default='ThreeDJAUNet3Plus',
-						choices=['ThreeDJAUNet3Plus'],
-						help="which model to use for training")
-	parser.add_argument("--model-description", default='', )
-	parser.add_argument("--bottleneck", default=True)
-	parser.add_argument("--loss-weights", default=[1, 1, 1, 1, 1, 1],
-						help="d0,d1,d2,d3,d4,d5 weighted average")
 	args = parser.parse_args()
 	
 	return args
