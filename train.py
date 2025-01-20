@@ -83,7 +83,7 @@ def get_transform(train, image_size=512, mean=(0.485, 0.456, 0.406), std=(0.229,
 
 
 def main(args):
-	device = torch.device("cpu")
+	device = torch.device(torch.device("cuda:0" if torch.cuda.is_available() else "cpu"))
 	batch_size = args.batch_size
 	# segmentation nun_classes + background
 	num_classes = args.num_classes + 1	# image size-
@@ -92,7 +92,7 @@ def main(args):
 	train_loader = torch.utils.data.DataLoader(train_dataset,
 											   batch_size=batch_size,
 											   num_workers=num_workers,
-											   shuffle=True,
+											   shuffle=False,
 											   pin_memory=False,
 											  )
 	
