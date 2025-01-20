@@ -24,6 +24,7 @@ def load_image(filename):
 def unique_mask_values(idx, mask_dir, mask_suffix):
     mask_file = list(mask_dir.glob(idx + mask_suffix + '.*'))[0]
     mask = np.asarray(load_image(mask_file))
+    # nbormalize to [0, 1]
     if mask.ndim == 2:
         return np.unique(mask)
     elif mask.ndim == 3:
@@ -106,6 +107,7 @@ class BasicDataset(Dataset):
         
         img = self.preprocess(self.mask_values, img, self.scale, is_mask=False)
         mask = self.preprocess(self.mask_values, mask, self.scale, is_mask=True)
+        mask[mask>0] = 1
         
         return {
             'image': torch.as_tensor(img.copy()).float().contiguous(),

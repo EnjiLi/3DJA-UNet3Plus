@@ -178,8 +178,7 @@ class DaulAttentionModule(nn.Module):
 
 class ThreeDJAUNet3Plus(nn.Module):
 
-    def __init__(self, in_channels=3, n_classes=1, feature_scale=4, is_deconv=True, is_batchnorm=True, PCM=False,
-                 bottleneck=False, ):
+    def __init__(self, in_channels=3, n_classes=1, feature_scale=4, is_deconv=True, is_batchnorm=True, PCM=True, bottleneck=True ):
         super(ThreeDJAUNet3Plus, self).__init__()
         self.is_deconv = is_deconv
         self.in_channels = in_channels

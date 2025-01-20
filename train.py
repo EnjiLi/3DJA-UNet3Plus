@@ -7,8 +7,7 @@ from utils.data_loading import BasicDataset
 import utils.transforms as T
 from model import ThreeDJAUNet3Plus
 from loss.dice_coefficient_loss import dice_loss, build_target
-from utils.distributed import MetricLogger, SmoothedValue
-
+from tqdm import tqdm
 
 def criterion(inputs, target, loss_weight=None, num_classes: int = 2, dice: bool = True, ignore_index: int = -100, loss_weights=[]):
 	losses = {}
@@ -84,27 +83,24 @@ def get_transform(train, image_size=512, mean=(0.485, 0.456, 0.406), std=(0.229,
 
 
 def main(args):
-	device = torch.device(args.device if torch.cuda.is_available() else "cpu")
+	device = torch.device("cpu")
 	batch_size = args.batch_size
 	# segmentation nun_classes + background
 	num_classes = args.num_classes + 1	# image size-
-	model_name = args.model_name
-	bottleneck = args.bottleneck
-	train_dataset = BasicDataset(images_dir= args.data_path, mask_dir= args.data_path)
+	train_dataset = BasicDataset(images_dir= args.image_path, mask_dir= args.mask_path)
 	num_workers = min([os.cpu_count(), batch_size if batch_size > 1 else 0, 8])
 	train_loader = torch.utils.data.DataLoader(train_dataset,
 											   batch_size=batch_size,
 											   num_workers=num_workers,
 											   shuffle=True,
 											   pin_memory=False,
-											   collate_fn=train_dataset.collate_fn)
+											  )
 	
-	model = ThreeDJAUNet3Plus(in_channels=3, n_classes=num_classes, PCM=True, bottleneck=bottleneck)
+	model = ThreeDJAUNet3Plus(in_channels=3, n_classes=num_classes, PCM=True)
 	total = sum([param.nelement() for param in model.parameters()])
 	print("====================Number of parameter:%.2fM====================" % (total / 1e6))
 	
 	model.to(device)
-	
 	params_to_optimize = [p for p in model.parameters() if p.requires_grad]
 	
 	if args.optimizer == 'SGD-M':
@@ -120,103 +116,50 @@ def main(args):
 	# Create a learning rate update strategy, here it is updated once per step (not per epoch)
 	lr_scheduler = create_lr_scheduler(optimizer, len(train_loader), args.epochs, warmup=True)
 	
-	if args.resume:
-		checkpoint = torch.load(args.resume, map_location='cpu')
-		model.load_state_dict(checkpoint['model'])
-		optimizer.load_state_dict(checkpoint['optimizer'])
-		lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
-		args.start_epoch = checkpoint['epoch'] + 1
-		if args.amp:
-			scaler.load_state_dict(checkpoint["scaler"])
-	
-	best_dice = 0.0
-	start_time = time.time()
-	
-	# Writing Hyperparameters
-	with open(hyperParameter_file, "a") as f:
-		f.write(f"{args}, Number of parameter={total / 1e6}M")
-	
-	for epoch in range(args.start_epoch, args.epochs):
-		# mean_loss, lr = train_one_epoch(model, optimizer, train_loader, device, epoch, args.epochs, num_classes,
-		# 								lr_scheduler=lr_scheduler, print_freq=args.print_freq, scaler=scaler,
-		# 								loss_weights=args.loss_weights)
-		model.train()
-		metric_logger = MetricLogger(delimiter="  ")
-		metric_logger.add_meter('lr', SmoothedValue(window_size=1, fmt='{value:.6f}'))
-		header = 'Epoch: [{}/{}]'.format(epoch, args.epochs)
-		
-		if num_classes == 2:
-			loss_weight = torch.as_tensor([1.0, 2.0], device=device)
-		else:
-			loss_weight = None
-		for image, target in metric_logger.log_every(data_loader, print_freq, header):
-			image, target = image.to(device), target.to(device)
-			with torch.cuda.amp.autocast(enabled=scaler is not None):
-				output = model(image)
-				loss = criterion(output, target, loss_weight, num_classes=num_classes, ignore_index=255,
-								 loss_weights=loss_weights)
-			
+	if args.checkpoint is not None:
+		model.load_state_dict(torch.load(args.checkpoint, map_location='cpu'))
+		model.to(device)
+		print("load checkpoint from %s" % args.checkpoint)
+	epochs = args.epochs
+	model.train()
+	for epoch in range(epochs):
+		print(f"Epoch {epoch + 1}/{epochs}")
+		bar = tqdm(train_loader)
+		for batch in bar:
+			imgs = batch["image"]
+			true_masks = batch["mask"]
+			imgs = imgs.to(device=device, dtype=torch.float32)
+			mask_type = torch.float32
+			true_masks = true_masks.to(device=device, dtype=mask_type)
+			print("true_masks shape", true_masks.shape)
+			true_masks = torch.nn.functional.one_hot(true_masks.long(), num_classes=2).squeeze(1).permute(0, 3, 1, 2)
+			masks_pred = model(imgs)
+			losses = []
+			for i in range(5):
+				loss = criterion(masks_pred[i].to(mask_type), true_masks.to(mask_type))
+				loss.to(device=device).to(torch.float32)
+				losses.append(loss)
+			loss = sum(losses)
 			optimizer.zero_grad()
-			if scaler is not None:
-				scaler.scale(loss).backward()
-				scaler.step(optimizer)
-				scaler.update()
-			else:
-				loss.backward()
-				optimizer.step()
-			
-			lr_scheduler.step()
-			
-			lr = optimizer.param_groups[0]["lr"]
-			metric_logger.update(loss=loss.item(), lr=lr)
-		confmat, dice = evaluate(model, val_loader, device=device, num_classes=num_classes, print_freq=args.print_freq,
-								 loss_weights=args.loss_weights)
-		val_info = str(confmat)
-		print(val_info)
-		print(f"dice coefficient: {dice:.3f}")
-		
-		# write into txt
-		with open(results_file, "a") as f:
-			# Record the train_loss, lr and validation set indicators corresponding to each epoch
-			train_info = f"[epoch: {epoch}]\n" \
-						 f"train_loss: {mean_loss:.4f}\n" \
-						 f"lr: {lr:.6f}\n" \
-						 f"dice coefficient: {dice:.4f}\n"
-			f.write(train_info + val_info + "\n\n")
-		
-		if args.save_best is True:
-			if best_dice < dice:
-				best_dice = dice
-			else:
-				continue
-		
-		save_file = {"model": model.state_dict(),
-					 "optimizer": optimizer.state_dict(),
-					 "lr_scheduler": lr_scheduler.state_dict(),
-					 "epoch": epoch,
-					 "args": args}
-		if args.amp:
-			save_file["scaler"] = scaler.state_dict()
-		
-		if args.save_best is True:
-			torch.save(save_file, "save_weights/" + args.data_path + "_" + model_name + "_" + nowtimestr + "_best_model.pth")
-		else:
-			torch.save(save_file, "save_weights/model_{}.pth".format(epoch))
-	
-	total_time = time.time() - start_time
-	total_time_str = str(datetime.timedelta(seconds=int(total_time)))
-	
-	print("training time {}".format(total_time_str))
+			loss.backward()
+			optimizer.step()
+			print(f"loss: {loss.item() / 5.:.5f}")
+			bar.set_description(f"loss: {loss.item() / 5.:.5f}")
+			bar.set_description(f"Epoch {epoch + 1}/{epochs}")
+			del loss
+		torch.save(model.state_dict(), args.save_path + f"unet3_epoch{epoch + 1}.pt")
+		print(f"Checkpoint {epoch + 1} saved !")
+	print("Training finished")
 
 
 def parse_args():
 	import argparse
 	parser = argparse.ArgumentParser(description="pytorch unet training")
-	parser.add_argument("--image-path", default="./INRIA", choices=['./WHU', './INRIA','./Massachusetts'], help="dataset root")
-	parser.add_argument("--mask-path", default="./INRIA/train/label", help="dataset root")
-	parser.add_argument("--num-classes", default=1, type=int)
+	parser.add_argument("--image_path", default="/home/ibra/Documents/DATA/segmentation/datasets/branch/data_final/img_crop/", help="dataset root")
+	parser.add_argument("--mask_path", default="/home/ibra/Documents/DATA/segmentation/datasets/branch/data_final/masks_crop/", help="dataset root")
+	parser.add_argument("--num_classes", default=1, type=int)
 	parser.add_argument("--device", default="cuda:0", help="training device")
-	parser.add_argument("-b", "--batch-size", default=2, type=int)
+	parser.add_argument("-b", "--batch_size", default=4, type=int)
 	parser.add_argument("--epochs", default=100, type=int, metavar="N",
 						help="number of total epochs to train")
 	parser.add_argument('--lr', default=0.005, type=float, help='initial learning rate')
@@ -225,12 +168,11 @@ def parse_args():
 	parser.add_argument('--wd', '--weight-decay', default=1e-4, type=float,
 						metavar='W', help='weight decay (default: 1e-4)',
 						dest='weight_decay')
-	parser.add_argument('--print-freq', default=5, type=int, help='print frequency')
-	parser.add_argument('--resume', default='', help='resume from checkpoint')
 	# Mixed precision training parameters
-	parser.add_argument("--amp", default=False, type=bool,
-						help="Use torch.cuda.amp for mixed precision training")
-	parser.add_argument("--image-size", default=512, type=int, help="size fo input image ")
+	parser.add_argument("--amp", default=False, type=bool, help="Use torch.cuda.amp for mixed precision training")
+	parser.add_argument("--image-csize", default=320, type=int, help="size fo input image ")
+	parser.add_argument("--checkpoint", default=None, help="resume from checkpoint, None means training from scratch")
+	parser.add_argument('--save_path', default="./save_weights/", help="save path")
 	args = parser.parse_args()
 	
 	return args
@@ -241,5 +183,4 @@ if __name__ == '__main__':
 	
 	if not os.path.exists("./save_weights"):
 		os.mkdir("./save_weights")
-	
 	main(args)
